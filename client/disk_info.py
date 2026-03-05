@@ -35,55 +35,74 @@ def _simulate_iops() -> float:
     return round(random.uniform(800.0, 2000.0), 2)
 
 
-def get_disk_metrics() -> Optional[dict]:
+def get_all_disk_metrics() -> list:
     """
-    Retorna metricas del primer disco en bytes (contrato del servidor).
+    Retorna metricas de TODOS los discos del sistema en bytes.
     """
     if not PSUTIL_AVAILABLE:
-        return {
+        return [{
             "disk_name": "SimulatedDisk",
             "disk_type": "SSD",
             "total_bytes": 512000000000,
             "used_bytes": 120000000000,
             "free_bytes": 392000000000,
             "iops": _simulate_iops(),
-        }
+        }]
+
+    disks = []
+    seen = set()  # evitar duplicados por mismo mountpoint
 
     try:
         partitions = psutil.disk_partitions(all=False)
-        if not partitions:
-            return None
-
-        target = None
-        for p in partitions:
-            if p.mountpoint in ("/", "C:\\"):
-                target = p
-                break
-        if target is None:
-            target = partitions[0]
-
-        usage = psutil.disk_usage(target.mountpoint)
-
-        iops = _simulate_iops()
+        io_counters = {}
         try:
-            counters = psutil.disk_io_counters(perdisk=False)
-            if counters:
-                iops = round(counters.read_count + counters.write_count, 2)
+            io_counters = psutil.disk_io_counters(perdisk=True) or {}
         except Exception:
             pass
 
-        return {
-            "disk_name": target.device if target.device else target.mountpoint,
-            "disk_type": _detect_disk_type(target.device),
-            "total_bytes": usage.total,
-            "used_bytes": usage.used,
-            "free_bytes": usage.free,
-            "iops": iops,
-        }
+        for p in partitions:
+            if p.mountpoint in seen:
+                continue
+            seen.add(p.mountpoint)
+
+            try:
+                usage = psutil.disk_usage(p.mountpoint)
+            except PermissionError:
+                continue  # disco sin permisos, saltar
+
+            # IOPS por disco si disponible
+            dev_key = p.device.replace("/dev/", "") if p.device else ""
+            iops = _simulate_iops()
+            if dev_key in io_counters:
+                c = io_counters[dev_key]
+                iops = round(c.read_count + c.write_count, 2)
+
+            disks.append({
+                "disk_name": p.device if p.device else p.mountpoint,
+                "disk_type": _detect_disk_type(p.device),
+                "total_bytes": usage.total,
+                "used_bytes": usage.used,
+                "free_bytes": usage.free,
+                "iops": iops,
+            })
 
     except Exception as e:
-        print(f"[ERROR] No se pudo obtener info del disco: {e}")
-        return None
+        print(f"[ERROR] No se pudo obtener info de discos: {e}")
+
+    return disks if disks else [{
+        "disk_name": "Unknown",
+        "disk_type": "SSD",
+        "total_bytes": 0,
+        "used_bytes": 0,
+        "free_bytes": 0,
+        "iops": 0.0,
+    }]
+
+
+def get_disk_metrics() -> Optional[dict]:
+    """Retorna solo el primer disco (compatibilidad). Usar get_all_disk_metrics() para todos."""
+    disks = get_all_disk_metrics()
+    return disks[0] if disks else None
 
 
 def get_report_timestamp() -> str:

@@ -5,7 +5,7 @@ Item 5: JSON oficial. Item 11: seccion extra con IP, MAC, RAM.
 """
 import json
 from typing import Optional
-from disk_info import get_disk_metrics, get_report_timestamp, get_extra_info
+from disk_info import get_all_disk_metrics, get_report_timestamp, get_extra_info
 from config import NODE_CODE, INTERVAL_SECONDS
 
 
@@ -36,9 +36,9 @@ def build_report() -> Optional[str]:
         }
     }
     """
-    disk = get_disk_metrics()
-    if disk is None:
-        print("[ERROR] No se pudo obtener metricas del disco.")
+    disks = get_all_disk_metrics()
+    if not disks:
+        print("[ERROR] No se pudo obtener metricas de discos.")
         return None
 
     report = {
@@ -46,7 +46,7 @@ def build_report() -> Optional[str]:
         "node_code": NODE_CODE,
         "client_reported_at": get_report_timestamp(),
         "interval_seconds": INTERVAL_SECONDS,
-        "disks": [disk],
+        "disks": disks,
         "extra": get_extra_info(),
     }
 
