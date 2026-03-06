@@ -1,0 +1,30 @@
+<script id="byDiskData" type="application/json">
+  {{ by_disk | tojson }}
+</script>
+
+<script>
+  const byDisk = JSON.parse(document.getElementById("byDiskData").textContent);
+
+  const keys = Object.keys(byDisk);
+  const labels = (keys.length ? byDisk[keys[0]].map(x => x.ts) : []);
+
+  const datasets = keys.map((k) => ({
+    label: k,
+    data: byDisk[k].map(x => x.pct),
+    tension: 0.2
+  }));
+
+  const ctx = document.getElementById("chart");
+  new Chart(ctx, {
+    type: "line",
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      plugins: { legend: { position: "bottom" } },
+      scales: {
+        y: { min: 0, max: 100, title: { display:true, text:"Uso (%)" } },
+        x: { ticks: { maxTicksLimit: 8 } }
+      }
+    }
+  });
+</script>

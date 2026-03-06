@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
+  <div class="card shadow-sm p-3 flex-grow-1">
+    <h4 class="mb-1 fw-bold">Monitor nacional de almacenamiento</h4>
+
+    <div class="text-muted">
+      Total: <b>{{ fmt_bytes(summary_total) }}</b> ·
+      Usado: <b>{{ fmt_bytes(summary_used) }}</b> ·
+      Libre: <b>{{ fmt_bytes(summary_free) }}</b>
+    </div>
+
+    <div class="text-muted mt-1">
+      Reportan <b>{{ reporting_count }}</b> de <b>{{ total_nodes }}</b> ·
+      <b>{{ summary_disks }}</b> discos
+    </div>
+  </div>
+
+  <div class="card shadow-sm p-3 kpi-card">
+    <div class="fw-bold mb-2">Utilización</div>
+
+    <div class="progress" style="height:12px">
+      <div
+        class="progress-bar bg-success"
+        role="progressbar"
+        data-pct="{{ summary_pct|round(0) }}">
+      </div>
+    </div>
+
+    <div class="mt-2 fw-bold">{{ summary_pct|round(0) }}%</div>
+  </div>
+</div>
+
+<hr class="my-4"/>
+
+<h5 class="fw-bold mb-3">Regional / Estado (por nodo)</h5>
+
+<div class="grid">
+  {% for n in nodes %}
+    <a class="nodecard card shadow-sm p-3 text-decoration-none" href="/node/{{ n.node_id }}">
+      <div class="d-flex gap-2 align-items-center">
+        <div class="diskicon"></div>
+
+        <div class="flex-grow-1">
+          <div class="fw-bold text-dark">{{ n.node_name }}</div>
+          <div class="text-muted small">{{ n.node_id }} · {{ n.disk_count }} discos</div>
+        </div>
+      </div>
+
+      {% if not n.reporting %}
+        <div class="mt-2 text-danger fw-bold">No reporta</div>
+        <div class="barwrap mt-2">
+          <div class="bar gray" data-pct="100"></div>
+        </div>
+      {% else %}
+        <div class="text-muted small mt-2">
+          Total <b>{{ fmt_bytes(n.total) }}</b>
+        </div>
+
+        <div class="text-muted small">
+          Usado <b>{{ fmt_bytes(n.used) }}</b> · Libre <b>{{ fmt_bytes(n.free) }}</b>
+        </div>
+
+        <div class="mt-1">
+          <span class="pill">{{ n.pct|round(0) }}%</span>
+        </div>
+
+        <div class="barwrap mt-2">
+          <div class="bar {{ n.color }}" data-pct="{{ n.pct|round(0) }}"></div>
+        </div>
+      {% endif %}
+    </a>
+  {% endfor %}
+</div>
+
+<script>
+  // Aplica width a barras y progress sin meter Jinja dentro del style=""
+  document.querySelectorAll("[data-pct]").forEach(el => {
+    const pct = parseFloat(el.getAttribute("data-pct")) || 0;
+    const clamped = Math.max(0, Math.min(100, pct));
+    el.style.width = clamped + "%";
+  });
+</script>
+
+{% endblock %}
