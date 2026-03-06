@@ -1,13 +1,20 @@
+# dashboard/src/db.py
 import os
+from pathlib import Path
+from dotenv import load_dotenv
+
 import psycopg2
 import psycopg2.extras
+
+# Cargar dashboard/.env siempre, aunque ejecutes desde otra carpeta
+ENV_PATH = Path(__file__).resolve().parents[1] / ".env"
+load_dotenv(dotenv_path=ENV_PATH)
 
 def get_conn():
     database_url = os.getenv("DATABASE_URL")
     if not database_url:
-        raise RuntimeError("DATABASE_URL no está configurado en .env")
+        raise RuntimeError("DATABASE_URL no está configurado en dashboard/.env")
 
-    # sslmode=require suele ser necesario en Supabase
     return psycopg2.connect(database_url, sslmode="require")
 
 def fetch_all(sql: str, params=None):
