@@ -8,7 +8,7 @@ from config import EXPECTED_NODES, ENFORCE_EXPECTED_NODES
 # ✅ DB (Supabase) - si falla, el server sigue funcionando
 DB_AVAILABLE = True
 try:
-    from db import insert_report, upsert_node
+    from db import insert_report, upsert_node, insert_disk_metrics
 except Exception as e:
     DB_AVAILABLE = False
     print(f"[DB] db.py no disponible o error al importar: {e}")
@@ -83,16 +83,26 @@ class ClientHandler(threading.Thread):
         interval_seconds = payload.get("interval_seconds")
 
         # 1) Insert histórico (reports)
+        report_id = None
         try:
-            insert_report(
+            resp = insert_report(
                 node_id=node_id,
                 client_reported_at=client_reported_at,
                 server_received_at=server_received_at,
                 interval_seconds=interval_seconds,
                 raw_payload=payload,
             )
+            if resp and resp.data:
+                report_id = resp.data[0]["id"]
         except Exception as e:
             print(f"[DB] Error insert_report({node_id}): {e}")
+
+        # 1b) Insert disk_metrics (una fila por disco)
+        if report_id:
+            try:
+                insert_disk_metrics(report_id, payload.get("disks", []))
+            except Exception as e:
+                print(f"[DB] Error insert_disk_metrics({node_id}): {e}")
 
         # 2) Upsert estado nodo (nodes)
         # Tu tabla tiene: node_id, addr, status, last_seen, node_name, ...

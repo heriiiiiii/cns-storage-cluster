@@ -2,12 +2,20 @@ import socket
 import json
 import uuid
 import threading
+import logging
 from datetime import datetime
 
-from config import HOST, PORT
+from config import HOST, PORT, ADMIN_PORT
 from cluster_state import ClusterState
 from client_handler import ClientHandler
 from monitor import MonitorThread
+
+try:
+    from flask import Flask, request, jsonify
+    FLASK_AVAILABLE = True
+except ImportError:
+    FLASK_AVAILABLE = False
+    print("[ADMIN] Flask no disponible. Instala: pip install flask")
 
 
 def send_command(cluster_state: ClusterState, node_id: str, command: str, payload: dict | None = None):
@@ -75,7 +83,7 @@ def console_thread(cluster_state: ClusterState):
       - cmdall <COMMAND...>
     """
     # Solo para “orden” visual, pero no bloquea nodos extra
-    order_preferido = ["ORU", "LPZ", "SCZ", "BEN", "TJA", "PND", "CBBA", "CHQ", "PTS"]
+    order_preferido = ["ORU-01", "LPZ-01", "SCZ-01", "BEN-01", "TJA-01", "PND-01", "CBBA-01", "CHQ-01", "PTS-01"]
 
     while True:
         try:
@@ -184,6 +192,41 @@ def console_thread(cluster_state: ClusterState):
             print("[!] consola:", e)
 
 
+def start_admin_api(cluster_state: ClusterState):
+    """API HTTP minima para que el dashboard pueda enviar comandos."""
+    if not FLASK_AVAILABLE:
+        return
+
+    app = Flask("cns-admin")
+    logging.getLogger("werkzeug").setLevel(logging.ERROR)
+
+    @app.route("/command", methods=["POST"])
+    def post_command():
+        data = request.get_json(silent=True) or {}
+        node_id = data.get("node_id")
+        command = data.get("command")
+        if not node_id or not command:
+            return jsonify({"error": "node_id y command son requeridos"}), 400
+        send_command(cluster_state, node_id, command)
+        return jsonify({"ok": True, "node_id": node_id, "command": command})
+
+    @app.route("/nodes", methods=["GET"])
+    def get_nodes():
+        snap = cluster_state.get_snapshot()
+        result = {}
+        for nid, data in snap.items():
+            last_seen = data.get("last_seen")
+            result[nid] = {
+                "status":    data.get("status"),
+                "last_seen": str(last_seen) if last_seen else None,
+                "region":    data.get("region"),
+            }
+        return jsonify(result)
+
+    print(f"[ADMIN] API HTTP escuchando en 0.0.0.0:{ADMIN_PORT}")
+    app.run(host="0.0.0.0", port=ADMIN_PORT, debug=False, use_reloader=False)
+
+
 def start_server():
     cluster_state = ClusterState()
 
@@ -191,6 +234,7 @@ def start_server():
     monitor.start()
 
     threading.Thread(target=console_thread, args=(cluster_state,), daemon=True).start()
+    threading.Thread(target=start_admin_api, args=(cluster_state,), daemon=True).start()
 
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)

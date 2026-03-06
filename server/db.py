@@ -48,3 +48,21 @@ def upsert_node(node_id: str, status: str, last_seen: str, addr: str | None, nod
 
     # ✅ clave: indicar la columna de conflicto
     return sb.table("nodes").upsert(data, on_conflict="node_id").execute()
+
+def insert_disk_metrics(report_id: str, disks: list):
+    """Inserta una fila en disk_metrics por cada disco del reporte."""
+    if sb is None or not disks:
+        return
+    for disk in disks:
+        try:
+            sb.table("disk_metrics").insert({
+                "report_id": report_id,
+                "disk_name": disk.get("disk_name"),
+                "disk_type": disk.get("disk_type"),
+                "total_bytes": disk.get("total_bytes"),
+                "used_bytes": disk.get("used_bytes"),
+                "free_bytes": disk.get("free_bytes"),
+                "iops": disk.get("iops"),
+            }).execute()
+        except Exception as e:
+            print(f"[DB] Error insert disk_metrics: {e}")
