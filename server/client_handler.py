@@ -62,6 +62,21 @@ class ClientHandler(threading.Thread):
                 print(f"[!] Error con {self.addr}: {e}")
                 break
 
+        # -------------------------------------------------------------
+        # Marcar inmediatamente como NO_REPORTA en Supabase al desconectarse
+        # -------------------------------------------------------------
+        if self.node_id and DB_AVAILABLE:
+            try:
+                upsert_node(
+                    node_id=self.node_id,
+                    status="NO_REPORTA",
+                    last_seen=datetime.utcnow().isoformat() + "Z",
+                    addr=str(self.addr),
+                )
+                print(f"[DB] {self.node_id} marcado NO_REPORTA por desconexión")
+            except Exception as e:
+                print(f"[DB] Error marcando NO_REPORTA ({self.node_id}): {e}")
+
         try:
             self.conn.close()
         except Exception:
@@ -166,7 +181,7 @@ class ClientHandler(threading.Thread):
         msg_type_norm = msg_type.lower()
 
         # =========================================================
-        # REPORT (nuevo cliente)
+        # REPORT (cliente nuevo)
         # =========================================================
         if msg_type_norm == "report":
 
@@ -207,7 +222,7 @@ class ClientHandler(threading.Thread):
             return
 
         # =========================================================
-        # HELLO
+        # HELLO (compatibilidad)
         # =========================================================
         if msg_type_norm == "hello":
 
@@ -249,7 +264,7 @@ class ClientHandler(threading.Thread):
             return
 
         # =========================================================
-        # METRICS
+        # METRICS (cliente antiguo)
         # =========================================================
         if msg_type_norm == "metrics":
 

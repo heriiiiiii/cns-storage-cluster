@@ -10,6 +10,7 @@ BYTES_TO_GB = 1024**3
 class ClusterState:
 
     def __init__(self):
+
         self.lock = threading.Lock()
 
         # node_id -> {region,status,last_seen,metrics,conn,addr,client_time}
@@ -68,7 +69,7 @@ class ClusterState:
                     "metrics": metrics,
                     "conn": None,
                     "addr": None,
-                    "client_time": metrics.get("timestamp")
+                    "client_time": None
                 }
 
             else:
@@ -77,14 +78,15 @@ class ClusterState:
                 self.nodes[node_id]["last_seen"] = now
                 self.nodes[node_id]["status"] = "UP"
 
-                # guardar hora reportada por el cliente
-                client_ts = metrics.get("timestamp")
+            # guardar hora reportada por el cliente (Modificación 1)
+            client_ts = metrics.get("timestamp")
 
-                if client_ts:
-                    try:
-                        self.nodes[node_id]["client_time"] = datetime.fromisoformat(client_ts)
-                    except Exception:
-                        pass
+            if client_ts:
+
+                try:
+                    self.nodes[node_id]["client_time"] = datetime.fromisoformat(client_ts)
+                except Exception:
+                    pass
 
     # -------------------------------------------------------
     # Marcar nodo como DOWN si timeout
@@ -95,7 +97,8 @@ class ClusterState:
 
             if node_id in self.nodes:
 
-                self.nodes[node_id]["status"] = "DOWN"
+                # usamos NO_REPORTA como pidió tu compañero
+                self.nodes[node_id]["status"] = "NO_REPORTA"
 
     # -------------------------------------------------------
     # Snapshot seguro del estado
@@ -227,7 +230,6 @@ class ClusterState:
         with self.lock:
 
             total = used = free = 0.0
-
             reporting = 0
 
             for node_id, node in self.nodes.items():
