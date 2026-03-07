@@ -6,7 +6,7 @@ Ejecutar:
     python -m streamlit run app.py
 """
 
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 
 import altair as alt
 import pandas as pd
@@ -27,7 +27,6 @@ from data import (
     get_nodes,
     get_latest_report,
     bytes_to_gb,
-    compute_cluster_totals,
 )
 
 # =========================================================
@@ -39,6 +38,11 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+# =========================================================
+# Ajuste de timeout visual del dashboard
+# =========================================================
+REPORT_TIMEOUT_SECONDS = 25
 
 # =========================================================
 # CSS / Estilo visual oscuro
@@ -69,15 +73,17 @@ html, body, [class*="css"] {
 
 .block-container {
     max-width: 1500px;
-    padding-top: 1.1rem;
+    padding-top: 3rem;
     padding-bottom: 1.5rem;
 }
 
 .main-title {
-    font-size: 2.15rem;
+    font-size: 2.4rem;
     font-weight: 800;
     color: var(--text);
-    margin-bottom: 0.15rem;
+    margin-top: 0.8rem;
+    margin-bottom: 0.4rem;
+    line-height: 1.25;
 }
 
 .sub-title {
@@ -276,6 +282,48 @@ def sum_disk_usage_gb(disks: list[dict]) -> tuple[float, float, float, float]:
     return total_gb, used_gb, free_gb, pct
 
 
+def get_usage_color(pct: float) -> str:
+    if pct >= 85:
+        return "#ef4444"
+    if pct >= 60:
+        return "#f59e0b"
+    return "#22c55e"
+
+
+def parse_iso_datetime(value) -> datetime | None:
+    if not value:
+        return None
+
+    try:
+        text = str(value).strip()
+        if text.endswith("Z"):
+            text = text.replace("Z", "+00:00")
+        dt = datetime.fromisoformat(text)
+
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+
+        return dt.astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
+def resolve_node_status(node: dict, timeout_seconds: int = REPORT_TIMEOUT_SECONDS) -> str:
+    raw_last_seen = node.get("last_seen")
+    last_seen_dt = parse_iso_datetime(raw_last_seen)
+
+    if last_seen_dt is None:
+        return "NO_REPORTA"
+
+    now_utc = datetime.now(timezone.utc)
+    age_seconds = (now_utc - last_seen_dt).total_seconds()
+
+    if age_seconds > timeout_seconds:
+        return "NO_REPORTA"
+
+    return "UP"
+
+
 def format_status(status: str) -> str:
     if status == "UP":
         return "🟢 UP"
@@ -284,12 +332,43 @@ def format_status(status: str) -> str:
     return f"🟡 {safe_text(status, 'SIN DATOS')}"
 
 
-def get_usage_color(pct: float) -> str:
-    if pct >= 85:
-        return "#ef4444"
-    if pct >= 60:
-        return "#f59e0b"
-    return "#22c55e"
+def compute_cluster_totals_live(nodes: dict, reports_cache: dict) -> dict:
+    total = 0.0
+    used = 0.0
+    free = 0.0
+    active = 0
+
+    for node_id in EXPECTED_NODES:
+        node = nodes.get(node_id, {})
+        report = reports_cache.get(node_id)
+
+        status = resolve_node_status(node)
+        if status != "UP":
+            continue
+
+        if not report:
+            continue
+
+        raw = report.get("raw_payload") or {}
+        disks = normalize_disks_from_payload(raw)
+        if not disks:
+            continue
+
+        total_gb, used_gb, free_gb, _ = sum_disk_usage_gb(disks)
+        total += total_gb
+        used += used_gb
+        free += free_gb
+        active += 1
+
+    util = (used / total * 100) if total > 0 else 0.0
+
+    return {
+        "total_gb": round(total, 2),
+        "used_gb": round(used, 2),
+        "free_gb": round(free, 2),
+        "util_percent": round(util, 1),
+        "active": active,
+    }
 
 
 def load_history(node_id: str, start_date=None, end_date=None):
@@ -356,6 +435,7 @@ with st.sidebar:
 
     st.caption(f"Actualizado: {datetime.now().strftime('%H:%M:%S')}")
     st.caption(f"Servidor admin: {SERVER_HOST}:{SERVER_ADMIN_PORT}")
+    st.caption(f"Timeout visual nodos: {REPORT_TIMEOUT_SECONDS}s")
 
 # =========================================================
 # Carga de datos
@@ -376,7 +456,7 @@ except Exception as e:
 # =========================================================
 # Header
 # =========================================================
-st.markdown('<div class="main-title">🗄️ Monitor Nacional de Almacenamiento</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-title">Monitor Nacional de Almacenamiento</div>', unsafe_allow_html=True)
 st.markdown(
     '<div class="sub-title">Panel central del cluster para visualización de capacidad, uso de discos, estado por nodo e histórico de reportes.</div>',
     unsafe_allow_html=True,
@@ -404,10 +484,18 @@ tab_resumen, tab_nodos, tab_hist, tab_cmd = st.tabs([
 # TAB 1: RESUMEN
 # =========================================================
 with tab_resumen:
-    totals = compute_cluster_totals(nodes, reports_cache)
+    totals = compute_cluster_totals_live(nodes, reports_cache)
 
     total_disks = 0
-    for report in reports_cache.values():
+    for node_id in EXPECTED_NODES:
+        node = nodes.get(node_id, {})
+        if resolve_node_status(node) != "UP":
+            continue
+
+        report = reports_cache.get(node_id)
+        if not report:
+            continue
+
         raw = report.get("raw_payload") or {}
         disks = normalize_disks_from_payload(raw)
         total_disks += len(disks)
@@ -429,7 +517,7 @@ with tab_resumen:
             st.metric("Discos detectados", f"{total_disks}")
         with info2:
             st.info(
-                f"El cluster registra **{total_disks} discos**, con **{totals['used_gb']:.1f} GB usados**, "
+                f"El cluster registra **{total_disks} discos activos**, con **{totals['used_gb']:.1f} GB usados**, "
                 f"**{totals['free_gb']:.1f} GB libres** y una utilización global de **{totals['util_percent']:.1f}%**."
             )
 
@@ -467,7 +555,7 @@ with tab_resumen:
             node = nodes.get(node_id, {})
             report = reports_cache.get(node_id)
 
-            status = safe_text(node.get("status"), "SIN DATOS")
+            status = resolve_node_status(node)
             last_seen = safe_text(node.get("last_seen"))
 
             total_gb = used_gb = free_gb = util_pct = 0.0
@@ -530,7 +618,7 @@ with tab_nodos:
         node = nodes.get(node_id, {})
         report = reports_cache.get(node_id)
 
-        status = safe_text(node.get("status"), "SIN DATOS")
+        status = resolve_node_status(node)
         last_seen = safe_text(node.get("last_seen"))
 
         disk_summary = "—"
@@ -585,9 +673,10 @@ with tab_nodos:
     report = reports_cache.get(selected_node)
     node = nodes.get(selected_node, {})
 
+    selected_status = resolve_node_status(node)
     info1, info2, info3 = st.columns(3)
     info1.metric("Nodo", selected_node)
-    info2.metric("Estado", safe_text(node.get("status"), "SIN DATOS"))
+    info2.metric("Estado", selected_status)
     info3.metric("Último reporte", safe_text(node.get("last_seen")))
 
     if not report:
